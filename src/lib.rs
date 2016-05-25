@@ -31,7 +31,7 @@ unsafe impl<H: BuildHasher> Sync for IntMap<H> {}
 unsafe impl<H: BuildHasher> Send for IntMap<H> {}
 
 impl<H: BuildHasher> LocklessIntMap<H> {
-    fn new(size: usize, hasher: H) -> Self {
+    pub fn new(size: usize, hasher: H) -> Self {
         let map = IntMap::new(size, hasher);
         LocklessIntMap {
             map: Arc::new(UnsafeCell::new(map))
