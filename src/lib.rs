@@ -73,7 +73,7 @@ impl<H: BuildHasher> IntMap<H> {
         }
     }
 
-    fn hash_key(&mut self, key: usize) -> usize {
+    fn hash_key(&self, key: usize) -> usize {
         let size = self.size;
         let mut hasher = self.hasher.build_hasher();
         key.hash(&mut hasher);
@@ -109,7 +109,7 @@ impl<H: BuildHasher> IntMap<H> {
         }
     }
 
-    pub fn get(&mut self, key: usize) -> Option<usize> {
+    pub fn get(&self, key: usize) -> Option<usize> {
         let idx = self.hash_key(key);
         let from_idx_to_end = &self.storage[idx..];
         for e in from_idx_to_end {
