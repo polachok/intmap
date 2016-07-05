@@ -90,7 +90,7 @@ impl<H: BuildHasher> IntMap<H> {
         }
     }
 
-    fn entries(&self) -> Vec<Entry> {
+    pub fn entries(&self) -> Vec<Entry> {
         let mut vec = Vec::with_capacity(self.size);
         for e in self.storage.iter() {
             let entry = e.clone();
