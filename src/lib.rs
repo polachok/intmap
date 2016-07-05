@@ -11,12 +11,27 @@ pub struct Entry {
     value: AtomicUsize,
 }
 
+impl Clone for Entry {
+    fn clone(&self) -> Self {
+        Entry::new(self.key(), self.value())
+    }
+}
+
 impl Entry {
     fn new(key: usize, val: usize) -> Self {
         Entry { 
             key: AtomicUsize::new(key),
             value: AtomicUsize::new(val),
         }
+    }
+
+    fn key(&self) -> usize {
+        self.key.load(Ordering::Relaxed)
+    }
+
+
+    fn value(&self) -> usize {
+        self.value.load(Ordering::Relaxed)
     }
 }
 
@@ -73,6 +88,15 @@ impl<H: BuildHasher> IntMap<H> {
             population: AtomicUsize::new(0),
             hasher: hasher,
         }
+    }
+
+    fn entries(&self) -> Vec<Entry> {
+        let mut vec = Vec::with_capacity(self.size);
+        for e in self.storage.iter() {
+            let entry = e.clone();
+            vec.push(entry);
+        }
+        vec
     }
 
     fn hash_key(&self, key: usize) -> usize {
