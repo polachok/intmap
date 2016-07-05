@@ -56,6 +56,7 @@ impl<H: BuildHasher> DerefMut for LocklessIntMap<H> {
 pub struct IntMap<H: BuildHasher> {
     storage: Vec<Entry>,
     size: usize,
+    population: AtomicUsize,
     hasher: H,
 }
 
@@ -69,6 +70,7 @@ impl<H: BuildHasher> IntMap<H> {
         IntMap { 
             storage: v,
             size: size,
+            population: AtomicUsize::new(0),
             hasher: hasher,
         }
     }
@@ -95,14 +97,19 @@ impl<H: BuildHasher> IntMap<H> {
         return true;
     }
 
-    pub fn insert(&mut self, key: usize, val: usize) {
+    /// Insert value at key. Returns true if successful.
+    pub fn insert(&mut self, key: usize, val: usize) -> bool {
+        if self.population.load(Ordering::Relaxed) == self.size {
+            return false;
+        }
         let idx = self.hash_key(key);
         {
             let from_idx_to_end = &mut self.storage[idx..];
             for e in from_idx_to_end {
                 let inserted = Self::insert_at(e, key, val);
                 if inserted {
-                    return;
+                    self.population.fetch_add(1, Ordering::Acquire);
+                    return true;
                 }
             }
         }
@@ -111,32 +118,39 @@ impl<H: BuildHasher> IntMap<H> {
             for e in from_start_to_idx {
                 let inserted = Self::insert_at(e, key, val);
                 if inserted {
-                    return;
+                    self.population.fetch_add(1, Ordering::Acquire);
+                    return true;
                 }
             }
         }
+        false
+    }
+
+    fn get_at(entry: &Entry, key: usize) -> (bool, Option<usize>) {
+        let probed_key = entry.key.load(Ordering::Relaxed);
+        if probed_key == key {
+            return (true, Some(entry.value.load(Ordering::Relaxed)));
+        }
+        if probed_key == 0 {
+            return (true, None);
+        }
+        (false, None)
     }
 
     pub fn get(&self, key: usize) -> Option<usize> {
         let idx = self.hash_key(key);
         let from_idx_to_end = &self.storage[idx..];
         for e in from_idx_to_end {
-            let probed_key = e.key.load(Ordering::Relaxed);
-            if probed_key == key {
-                return Some(e.value.load(Ordering::Relaxed));
-            }
-            if probed_key == 0 {
-                return None;
+            let (found, val) = Self::get_at(e, key);
+            if found {
+                return val;
             }
         }
         let from_start_to_idx = &self.storage[0..idx];
         for e in from_start_to_idx {
-            let probed_key = e.key.load(Ordering::Relaxed);
-            if probed_key == key {
-                return Some(e.value.load(Ordering::Relaxed));
-            }
-            if probed_key == 0 {
-                return None;
+            let (found, val) = Self::get_at(e, key);
+            if found {
+                return val;
             }
         }
         return None;
@@ -271,5 +285,22 @@ mod tests {
             t1.join().unwrap();
             t2.join().unwrap();
         });
+    }
+
+    #[test]
+    fn over_pop() {
+        use super::*;
+        use std::collections::hash_map::RandomState;
+
+        let mut map = LocklessIntMap::new(8, RandomState::new());
+        for i in 0..10 {
+            let res = map.insert(i, i);
+            if i >= 8 {
+                assert!(res == false);
+            }
+        }
+        for i in 0..8 {
+            assert!(Some(i) == map.get(i));
+        }
     }
 }
