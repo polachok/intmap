@@ -126,9 +126,51 @@ impl<H: BuildHasher> IntMap<H> {
         false
     }
 
+    fn delete_at(entry: &mut Entry, key: usize) -> bool {
+        let prev_key = entry.key.load(Ordering::Relaxed);
+        if prev_key != key {
+            return false;
+        }
+        let val = entry.value.load(Ordering::Relaxed);
+        if entry.value.compare_and_swap(val, 0, Ordering::Relaxed) == val {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn delete(&mut self, key: usize) -> bool {
+        let idx = self.hash_key(key);
+        {
+            let from_idx_to_end = &mut self.storage[idx..];
+            for e in from_idx_to_end {
+                let found = Self::delete_at(e, key);
+                if found {
+                    self.population.fetch_sub(1, Ordering::Acquire);
+                    return true;
+                }
+            }
+        }
+        {
+            let from_start_to_idx = &mut self.storage[0..idx];
+            for e in from_start_to_idx {
+                let found = Self::delete_at(e, key);
+                if found {
+                    self.population.fetch_sub(1, Ordering::Acquire);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     fn get_at(entry: &Entry, key: usize) -> (bool, Option<usize>) {
         let probed_key = entry.key.load(Ordering::Relaxed);
         if probed_key == key {
+            let val = entry.value.load(Ordering::Relaxed);
+            if val == 0 {
+                return (true, None);
+            }
             return (true, Some(entry.value.load(Ordering::Relaxed)));
         }
         if probed_key == 0 {
@@ -156,6 +198,14 @@ impl<H: BuildHasher> IntMap<H> {
         return None;
     }
 
+
+    pub fn population(&self) -> usize {
+        self.population.load(Ordering::Relaxed)
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
 }
 
 #[cfg(test)]
@@ -206,11 +256,11 @@ mod tests {
         let mut map = LocklessIntMap::new(1024, RandomState::new());
 
         b.iter(|| {
-            for i in 0..1000 {
+            for i in 1..1000 {
                 map.insert(i, i);
             }
         });
-        for i in 0..1000 {
+        for i in 1..1000 {
             assert!(map.get(i) == Some(i));
         }
     }
@@ -240,20 +290,20 @@ mod tests {
         b.iter(|| {
             let mut m = map.clone();
             let t1 = thread::spawn(move || {
-                for i in 0..1000 {
+                for i in 1..1000 {
                     m.insert(i, i);
                 }
             });
             let mut m = map.clone();
             let t2 = thread::spawn(move || {
-                for i in (0..1000).rev() {
+                for i in (1..1000).rev() {
                     m.insert(i, i);
                 }
             });
             t1.join().unwrap();
             t2.join().unwrap();
         });
-        for i in 0..1000 {
+        for i in 1..1000 {
             assert!(map.get(i) == Some(i));
         }
     }
@@ -270,14 +320,14 @@ mod tests {
         b.iter(|| {
             let m = map.clone();
             let t1 = thread::spawn(move || {
-                for i in 0..500 {
+                for i in 1..500 {
                     let mut m = (*m).write().unwrap();
                     m.insert(i, i);
                 }
             });
             let m = map.clone();
             let t2 = thread::spawn(move || {
-                for i in (0..1000).rev() {
+                for i in (1..1000).rev() {
                     let mut m = (*m).write().unwrap();
                     m.insert(i, i);
                 }
@@ -293,14 +343,38 @@ mod tests {
         use std::collections::hash_map::RandomState;
 
         let mut map = LocklessIntMap::new(8, RandomState::new());
-        for i in 0..10 {
+        for i in 1..10 {
             let res = map.insert(i, i);
-            if i >= 8 {
+            if i >= 9 {
                 assert!(res == false);
             }
         }
-        for i in 0..8 {
+        for i in 1..9 {
             assert!(Some(i) == map.get(i));
         }
+    }
+
+
+    #[test]
+    fn test_delete() {
+        use super::*;
+        use std::collections::hash_map::RandomState;
+
+        let mut map = LocklessIntMap::new(8, RandomState::new());
+        for i in 1..9 {
+            let res = map.insert(i, i);
+        }
+        map.delete(5);
+        for i in 1..9 {
+            if i == 5 {
+                assert!(None == map.get(i));
+            } else {
+                assert!(Some(i) == map.get(i));
+            }
+        }
+        assert!(map.population() == 7);
+        map.insert(5, 8);
+        assert!(map.get(5) == Some(8));
+        assert!(map.population() == 8);
     }
 }
