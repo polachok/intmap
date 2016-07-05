@@ -80,31 +80,39 @@ impl<H: BuildHasher> IntMap<H> {
         (hasher.finish() & ((size as u64) - 1)) as usize
     }
 
+    fn insert_at(entry: &mut Entry, key: usize, val: usize) -> bool {
+        let prev_key = entry.key.load(Ordering::Relaxed);
+        if prev_key != key {
+            if prev_key != 0 {
+                return false;
+            }
+            let prev_key = entry.key.compare_and_swap(0, key, Ordering::Relaxed);
+            if prev_key != 0 && prev_key != key {
+                return false;
+            }
+        }
+        entry.value.store(val, Ordering::Relaxed);
+        return true;
+    }
+
     pub fn insert(&mut self, key: usize, val: usize) {
         let idx = self.hash_key(key);
         {
             let from_idx_to_end = &mut self.storage[idx..];
             for e in from_idx_to_end {
-                let prev_key = e.key.load(Ordering::Relaxed);
-                if prev_key != key {
-                    if prev_key != 0 {
-                        continue;
-                    }
-                    let prev_key = e.key.compare_and_swap(0, key, Ordering::Relaxed);
-                    if prev_key != 0 && prev_key != key {
-                        continue;
-                    }
+                let inserted = Self::insert_at(e, key, val);
+                if inserted {
+                    return;
                 }
-                e.value.store(val, Ordering::Relaxed);
-                return;
             }
         }
-        let from_start_to_idx = &mut self.storage[0..idx];
-        for e in from_start_to_idx {
-            let prev_key = e.key.compare_and_swap(0, key, Ordering::Relaxed);
-            if prev_key == 0 || prev_key == key {
-                e.value.store(val, Ordering::Relaxed);
-                return;
+        {
+            let from_start_to_idx = &mut self.storage[0..idx];
+            for e in from_start_to_idx {
+                let inserted = Self::insert_at(e, key, val);
+                if inserted {
+                    return;
+                }
             }
         }
     }
@@ -133,12 +141,31 @@ impl<H: BuildHasher> IntMap<H> {
         }
         return None;
     }
+
 }
 
 #[cfg(test)]
 mod tests {
     extern crate test;
     use self::test::Bencher;
+
+    #[test]
+    fn test_clone() {
+        use super::*;
+        use std::collections::hash_map::RandomState;
+
+        let mut map = LocklessIntMap::new(1024, RandomState::new());
+        map.insert(1, 1);
+        map.insert(2, 3);
+        println!("KEY: {:?} VAL: {:?}", 1, map.get(1));
+        assert!(map.get(1) == Some(1));
+        assert!(map.get(2) == Some(3));
+
+        let mut map2 = map.clone();
+        println!("KEY: {:?} VAL: {:?}", 1, map2.get(1));
+        assert!(map2.get(1) == Some(1));
+        assert!(map2.get(2) == Some(3));
+    }
 
     #[test]
     fn it_works() {
