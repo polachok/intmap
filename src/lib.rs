@@ -25,12 +25,12 @@ impl Entry {
         }
     }
 
-    fn key(&self) -> usize {
+    pub fn key(&self) -> usize {
         self.key.load(Ordering::Relaxed)
     }
 
 
-    fn value(&self) -> usize {
+    pub fn value(&self) -> usize {
         self.value.load(Ordering::Relaxed)
     }
 }
