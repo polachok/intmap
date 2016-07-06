@@ -1,4 +1,4 @@
-#![feature(test)]
+//#![feature(test)]
 use std::sync::atomic::{AtomicUsize,Ordering};
 use std::hash::{Hasher,BuildHasher,Hash};
 use std::cell::UnsafeCell;
@@ -93,6 +93,9 @@ impl<H: BuildHasher> IntMap<H> {
     pub fn entries(&self) -> Vec<Entry> {
         let mut vec = Vec::with_capacity(self.size);
         for e in self.storage.iter() {
+            if e.value.load(Ordering::Relaxed) == 0 {
+                continue;
+            }
             let entry = e.clone();
             vec.push(entry);
         }
